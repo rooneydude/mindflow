@@ -1,65 +1,216 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import StreamInput from '@/components/StreamInput';
+import EntryFeed from '@/components/EntryFeed';
+import Sidebar from '@/components/Sidebar';
+import ConnectionPanel from '@/components/ConnectionPanel';
+import DailySummaryComponent from '@/components/DailySummary';
+import { Entry, EntryType, DailySummary } from '@/lib/types';
 
 export default function Home() {
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<EntryType | 'all'>('all');
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
+  const [connectionEntries, setConnectionEntries] = useState<Entry[]>([]);
+  const [dailySummary, setDailySummary] = useState<DailySummary | null>(null);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+
+  const fetchEntries = useCallback(async () => {
+    const params = new URLSearchParams();
+    if (activeFilter !== 'all') params.set('type', activeFilter);
+    if (activeTag) params.set('tag', activeTag);
+
+    const res = await fetch(`/api/entries?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      setEntries(data);
+    }
+  }, [activeFilter, activeTag]);
+
+  useEffect(() => {
+    fetchEntries();
+  }, [fetchEntries]);
+
+  useEffect(() => {
+    fetch('/api/summary')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setDailySummary(data); });
+  }, []);
+
+  const handleSubmit = async (content: string) => {
+    setIsProcessing(true);
+    try {
+      // Step 1: AI analysis
+      const analyzeRes = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      const analysis = await analyzeRes.json();
+
+      // Step 2: Save entry with AI metadata
+      const saveRes = await fetch('/api/entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content,
+          type: analysis.type,
+          tags: analysis.tags,
+          embedding_summary: analysis.summary,
+          priority: analysis.priority,
+          connections: analysis.connections,
+        }),
+      });
+
+      if (saveRes.ok) {
+        const newEntry = await saveRes.json();
+        setEntries((prev) => [newEntry, ...prev]);
+      }
+    } catch (err) {
+      console.error('Failed to save entry:', err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleToggleComplete = async (id: string) => {
+    const entry = entries.find((e) => e.id === id);
+    if (!entry) return;
+
+    const newStatus = entry.status === 'completed' ? 'active' : 'completed';
+    const res = await fetch('/api/entries', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: newStatus }),
+    });
+
+    if (res.ok) {
+      const updated = await res.json();
+      setEntries((prev) => prev.map((e) => (e.id === id ? updated : e)));
+    }
+  };
+
+  const handleArchive = async (id: string) => {
+    const res = await fetch('/api/entries', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, is_archived: true }),
+    });
+
+    if (res.ok) {
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+    }
+  };
+
+  const handleShowConnections = async (entry: Entry) => {
+    if (entry.connections.length === 0) return;
+    setSelectedEntry(entry);
+
+    const res = await fetch(`/api/connections?ids=${entry.connections.join(',')}`);
+    if (res.ok) {
+      const data = await res.json();
+      setConnectionEntries(data);
+    }
+  };
+
+  const handleGenerateSummary = async () => {
+    setIsGeneratingSummary(true);
+    try {
+      const res = await fetch('/api/summary', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setDailySummary(data);
+      }
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
+
+  const entryCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: entries.length };
+    for (const entry of entries) {
+      counts[entry.type] = (counts[entry.type] || 0) + 1;
+    }
+    return counts;
+  }, [entries]);
+
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    for (const entry of entries) {
+      for (const tag of entry.tags) {
+        tagSet.add(tag);
+      }
+    }
+    return Array.from(tagSet).sort();
+  }, [entries]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen">
+      {/* Header */}
+      <header className="border-b border-zinc-800/50 bg-zinc-950/80 backdrop-blur-sm sticky top-0 z-40">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🌊</span>
+            <h1 className="text-lg font-semibold text-zinc-100 tracking-tight">MindFlow</h1>
+          </div>
+          <span className="text-xs text-zinc-600">
+            {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+          </span>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-5xl mx-auto px-4 py-6">
+        {/* Input */}
+        <div className="mb-6">
+          <StreamInput onSubmit={handleSubmit} isProcessing={isProcessing} />
+        </div>
+
+        {/* Daily Summary */}
+        <div className="mb-6">
+          <DailySummaryComponent
+            summary={dailySummary}
+            onGenerate={handleGenerateSummary}
+            isGenerating={isGeneratingSummary}
+          />
+        </div>
+
+        {/* Content area */}
+        <div className="flex flex-col lg:flex-row gap-6">
+          <Sidebar
+            activeFilter={activeFilter}
+            onFilterChange={setActiveFilter}
+            entryCounts={entryCounts}
+            allTags={allTags}
+            activeTag={activeTag}
+            onTagClick={setActiveTag}
+          />
+
+          <div className="flex-1 min-w-0">
+            <EntryFeed
+              entries={entries}
+              onToggleComplete={handleToggleComplete}
+              onArchive={handleArchive}
+              onShowConnections={handleShowConnections}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          </div>
         </div>
       </main>
+
+      {/* Connection Panel Modal */}
+      {selectedEntry && (
+        <ConnectionPanel
+          entry={selectedEntry}
+          connections={connectionEntries}
+          onClose={() => {
+            setSelectedEntry(null);
+            setConnectionEntries([]);
+          }}
+        />
+      )}
     </div>
   );
 }
