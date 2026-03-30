@@ -68,7 +68,7 @@ export default function StreamInput({ onSubmit, isProcessing }: StreamInputProps
         <div className="flex items-center justify-between px-3 pb-2">
           <span className="text-xs text-zinc-600">
             Press <kbd className="px-1 py-0.5 bg-zinc-800 rounded text-zinc-400 text-[10px]">/ </kbd> to focus &middot;{' '}
-            <kbd className="px-1 py-0.5 bg-zinc-800 rounded text-zinc-400 text-[10px]">{navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+Enter</kbd> to save
+            <kbd className="px-1 py-0.5 bg-zinc-800 rounded text-zinc-400 text-[10px]">⌘+Enter</kbd> to save
           </span>
           <button
             onClick={handleSubmit}

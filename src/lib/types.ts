@@ -1,5 +1,6 @@
 export type EntryType = 'thought' | 'task' | 'journal' | 'plan';
 export type EntryStatus = 'active' | 'completed' | 'archived';
+export type Recurrence = 'daily' | 'weekly' | 'monthly';
 
 export interface Entry {
   id: string;
@@ -11,8 +12,29 @@ export interface Entry {
   is_archived: boolean;
   priority: number | null;
   connections: string[];
+  // Tasks
+  due_date: string | null;
+  recurrence: Recurrence | null;
+  project: string | null;
+  parent_id: string | null;
+  // Journal
+  mood: number | null; // 1-5
+  // Thoughts
+  is_favorited: boolean;
+  // Plans
+  goal_target: number | null;
+  goal_progress: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface Milestone {
+  id: string;
+  plan_entry_id: string;
+  title: string;
+  is_completed: boolean;
+  order_index: number;
+  created_at: string;
 }
 
 export interface DailySummary {

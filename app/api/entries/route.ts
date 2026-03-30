@@ -27,6 +27,11 @@ export async function GET(request: NextRequest) {
     query = query.contains('tags', [tag]);
   }
 
+  const project = searchParams.get('project');
+  if (project) {
+    query = query.eq('project', project);
+  }
+
   const { data, error } = await query;
 
   if (error) {
@@ -38,7 +43,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { content, type, tags, embedding_summary, priority, connections } = body;
+  const { content, type, tags, embedding_summary, priority, connections,
+          due_date, recurrence, project, parent_id, mood,
+          is_favorited, goal_target, goal_progress } = body;
 
   const { data, error } = await supabase
     .from('entries')
@@ -51,6 +58,14 @@ export async function POST(request: NextRequest) {
       is_archived: false,
       priority: priority || null,
       connections: connections || [],
+      due_date: due_date || null,
+      recurrence: recurrence || null,
+      project: project || null,
+      parent_id: parent_id || null,
+      mood: mood || null,
+      is_favorited: is_favorited ?? false,
+      goal_target: goal_target || null,
+      goal_progress: goal_progress ?? 0,
     })
     .select()
     .single();
@@ -71,7 +86,8 @@ export async function PATCH(request: NextRequest) {
   }
 
   // NEVER allow hard deletes — only status/archive updates
-  const allowedFields = ['status', 'is_archived', 'content', 'type', 'tags', 'priority', 'connections'];
+  const allowedFields = ['status', 'is_archived', 'content', 'type', 'tags', 'priority', 'connections',
+    'due_date', 'recurrence', 'project', 'parent_id', 'mood', 'is_favorited', 'goal_target', 'goal_progress'];
   const safeUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const key of allowedFields) {
     if (key in updates) {
