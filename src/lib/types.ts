@@ -55,4 +55,7 @@ export interface AIAnalysis {
   summary: string;
   priority: number | null;
   connections: string[];
+  due_date: string | null;
+  project: string | null;
+  mood: number | null;
 }

@@ -62,6 +62,9 @@ export default function Home() {
           embedding_summary: analysis.summary,
           priority: analysis.priority,
           connections: analysis.connections,
+          due_date: analysis.due_date || null,
+          project: analysis.project || null,
+          mood: analysis.mood || null,
         }),
       });
 

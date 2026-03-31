@@ -14,15 +14,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'content is required' }, { status: 400 });
   }
 
-  // Fetch recent entries for context
+  // Fetch recent entries for context (include project field)
   const { data: recentEntries } = await supabase
     .from('entries')
-    .select('id, content, type, tags')
+    .select('id, content, type, tags, project')
     .eq('is_archived', false)
     .order('created_at', { ascending: false })
     .limit(20);
 
-  const analysis = await analyzeEntry(content, recentEntries || []);
+  // Get existing project names
+  const { data: projectRows } = await supabase
+    .from('entries')
+    .select('project')
+    .neq('project', null)
+    .eq('is_archived', false);
+
+  const existingProjects = Array.from(
+    new Set((projectRows ?? []).map(r => r.project).filter(Boolean))
+  );
+
+  const analysis = await analyzeEntry(content, recentEntries || [], existingProjects);
 
   return NextResponse.json(analysis);
 }

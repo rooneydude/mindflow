@@ -7,11 +7,20 @@ const anthropic = new Anthropic({
 
 export async function analyzeEntry(
   content: string,
-  recentEntries: Pick<Entry, 'id' | 'content' | 'type' | 'tags'>[]
+  recentEntries: Pick<Entry, 'id' | 'content' | 'type' | 'tags' | 'project'>[],
+  existingProjects: string[]
 ): Promise<AIAnalysis> {
+  const today = new Date().toISOString().split('T')[0];
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  const dayOfWeek = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+
   const recentContext = recentEntries
-    .map((e) => `[${e.id}] (${e.type}) ${e.content} | tags: ${e.tags.join(', ')}`)
+    .map((e) => `[${e.id}] (${e.type}) ${e.content} | tags: ${e.tags.join(', ')}${e.project ? ` | project: ${e.project}` : ''}`)
     .join('\n');
+
+  const projectList = existingProjects.length > 0
+    ? `\nExisting projects: ${existingProjects.join(', ')}`
+    : '';
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
@@ -19,29 +28,36 @@ export async function analyzeEntry(
     messages: [
       {
         role: 'user',
-        content: `You are an AI assistant for a personal journal/planner app. Analyze this new entry and return a JSON response.
+        content: `You are an AI assistant for a personal journal/planner app called MindFlow. Analyze this new entry and extract ALL structured information from it.
+
+Today is ${dayOfWeek}, ${today}. Tomorrow is ${tomorrow}.
 
 New entry: "${content}"
 
-Recent entries for context (find connections if relevant):
+Recent entries for context:
 ${recentContext || 'No recent entries yet.'}
+${projectList}
 
 Return ONLY valid JSON with these fields:
 {
   "type": "thought" | "task" | "journal" | "plan",
   "tags": ["tag1", "tag2", ...],
   "summary": "A brief one-line summary for matching with future entries",
-  "priority": null or 1-5 (only for tasks, 1=highest),
-  "connections": ["id1", "id2"] (IDs of related recent entries, empty array if none)
+  "priority": null or 1-4 (1=urgent, 2=high, 3=medium, 4=low; only for tasks),
+  "connections": ["id1", "id2"],
+  "due_date": "YYYY-MM-DD" or null,
+  "project": "project name" or null,
+  "mood": 1-5 or null (only for journal entries: 1=rough, 5=great)
 }
 
-Rules:
-- "thought" = an idea, observation, or reflection
-- "task" = something to do, an action item
-- "journal" = personal diary entry, how the user feels, what happened
-- "plan" = a goal, strategy, or multi-step intention
-- Tags should be 1-3 words each, lowercase, 2-5 tags total
-- Only connect entries that are genuinely related in topic or intent`,
+IMPORTANT RULES:
+- CLASSIFY correctly: action items = "task", feelings/reflections = "journal", ideas = "thought", goals/strategies = "plan"
+- DUE DATES: Extract dates from natural language. "by tomorrow" = "${tomorrow}", "by Thursday" = next Thursday's date, "today" = "${today}", "next week" = 7 days from today. If no date mentioned, null.
+- PROJECTS: Match to an existing project if the entry clearly relates to one (case-insensitive, partial match OK). If the entry mentions a new project/course/subject name, use that as the project. If no project context, null.
+- PRIORITY: For tasks, infer urgency. Due today/tomorrow = 1 or 2. "ASAP"/"urgent" = 1. General tasks = 3. Low priority / someday = 4. Non-tasks = null.
+- MOOD: Only for journal entries. Detect emotional tone. Happy/excited = 5, good = 4, neutral = 3, frustrated = 2, upset = 1.
+- CONNECTIONS: Link to recent entries that share the same project, topic, or related intent.
+- Tags should be 1-3 words each, lowercase, 2-5 tags total.`,
       },
     ],
   });
@@ -59,6 +75,9 @@ Rules:
       summary: content.slice(0, 100),
       priority: null,
       connections: [],
+      due_date: null,
+      project: null,
+      mood: null,
     };
   }
 }
