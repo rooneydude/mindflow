@@ -7,6 +7,16 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+// Simple similarity check (word overlap)
+function similarity(a: string, b: string): number {
+  const wordsA = new Set(a.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 2));
+  const wordsB = new Set(b.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 2));
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+  let overlap = 0;
+  for (const w of wordsA) if (wordsB.has(w)) overlap++;
+  return overlap / Math.min(wordsA.size, wordsB.size);
+}
+
 export async function POST(request: NextRequest) {
   const { content } = await request.json();
 
@@ -22,6 +32,17 @@ export async function POST(request: NextRequest) {
     .order('created_at', { ascending: false })
     .limit(20);
 
+  // Smart dedup: find similar existing entries
+  let similarEntryId: string | null = null;
+  if (recentEntries) {
+    for (const entry of recentEntries) {
+      if (similarity(content, entry.content) > 0.6) {
+        similarEntryId = entry.id;
+        break;
+      }
+    }
+  }
+
   // Get existing project names
   const { data: projectRows } = await supabase
     .from('entries')
@@ -35,5 +56,8 @@ export async function POST(request: NextRequest) {
 
   const analysis = await analyzeEntry(content, recentEntries || [], existingProjects);
 
-  return NextResponse.json(analysis);
+  return NextResponse.json({
+    ...analysis,
+    similar_entry_id: similarEntryId,
+  });
 }
