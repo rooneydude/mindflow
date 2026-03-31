@@ -1,5 +1,6 @@
 export type EntryType = 'thought' | 'task' | 'journal' | 'plan';
-export type EntryStatus = 'active' | 'completed' | 'archived';
+export type EntryStatus = 'active' | 'in_progress' | 'completed' | 'archived';
+export type Priority = 'urgent' | 'high' | 'medium' | 'low';
 export type Recurrence = 'daily' | 'weekly' | 'monthly';
 
 export interface Entry {
@@ -17,6 +18,9 @@ export interface Entry {
   recurrence: Recurrence | null;
   project: string | null;
   parent_id: string | null;
+  notes: string | null;
+  sort_order: number;
+  labels: string[];
   // Journal
   mood: number | null; // 1-5
   // Thoughts

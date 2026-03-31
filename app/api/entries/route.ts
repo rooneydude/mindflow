@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { content, type, tags, embedding_summary, priority, connections,
           due_date, recurrence, project, parent_id, mood,
-          is_favorited, goal_target, goal_progress } = body;
+          is_favorited, goal_target, goal_progress, notes, sort_order, labels } = body;
 
   const { data, error } = await supabase
     .from('entries')
@@ -66,6 +66,9 @@ export async function POST(request: NextRequest) {
       is_favorited: is_favorited ?? false,
       goal_target: goal_target || null,
       goal_progress: goal_progress ?? 0,
+      notes: notes || null,
+      sort_order: sort_order ?? 0,
+      labels: labels ?? [],
     })
     .select()
     .single();
@@ -87,7 +90,8 @@ export async function PATCH(request: NextRequest) {
 
   // NEVER allow hard deletes — only status/archive updates
   const allowedFields = ['status', 'is_archived', 'content', 'type', 'tags', 'priority', 'connections',
-    'due_date', 'recurrence', 'project', 'parent_id', 'mood', 'is_favorited', 'goal_target', 'goal_progress'];
+    'due_date', 'recurrence', 'project', 'parent_id', 'mood', 'is_favorited', 'goal_target', 'goal_progress',
+    'notes', 'sort_order', 'labels'];
   const safeUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const key of allowedFields) {
     if (key in updates) {
