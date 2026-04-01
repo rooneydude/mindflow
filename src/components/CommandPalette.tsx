@@ -51,11 +51,14 @@ export default function CommandPalette() {
     if (!res.ok) return;
     const all: Entry[] = await res.json();
     const lower = q.toLowerCase();
+    // Never show journal entries in command palette (private)
     const matched = all.filter(e =>
-      e.content.toLowerCase().includes(lower) ||
-      e.tags.some(t => t.toLowerCase().includes(lower)) ||
-      (e.project ?? '').toLowerCase().includes(lower) ||
-      (e.notes ?? '').toLowerCase().includes(lower)
+      e.type !== 'journal' && (
+        e.content.toLowerCase().includes(lower) ||
+        e.tags.some(t => t.toLowerCase().includes(lower)) ||
+        (e.project ?? '').toLowerCase().includes(lower) ||
+        (e.notes ?? '').toLowerCase().includes(lower)
+      )
     ).slice(0, 8);
     setResults(matched);
     setSelectedIdx(0);

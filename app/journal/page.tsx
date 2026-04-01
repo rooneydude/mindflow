@@ -6,6 +6,123 @@ import { Entry } from '@/lib/types';
 const MOOD_EMOJIS = ['', '😞', '😕', '😐', '🙂', '😄'];
 const MOOD_LABELS = ['', 'Rough', 'Meh', 'Okay', 'Good', 'Great'];
 
+// ── PIN Lock Screen ──────────────────────────────────────────────────────────
+
+function PinLock({ onUnlock }: { onUnlock: () => void }) {
+  const [hasPin, setHasPin] = useState<boolean | null>(null);
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [step, setStep] = useState<'check' | 'create' | 'enter'>('check');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/journal-auth')
+      .then(r => r.json())
+      .then(d => {
+        setHasPin(d.hasPin);
+        setStep(d.hasPin ? 'enter' : 'create');
+      });
+  }, []);
+
+  const createPin = async () => {
+    if (pin.length < 4) { setError('PIN must be at least 4 characters'); return; }
+    if (pin !== confirmPin) { setError('PINs do not match'); return; }
+    setLoading(true);
+    setError('');
+    const res = await fetch('/api/journal-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set', pin }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      sessionStorage.setItem('journal_unlocked', 'true');
+      onUnlock();
+    } else {
+      setError(data.error || 'Failed to set PIN');
+    }
+    setLoading(false);
+  };
+
+  const verifyPin = async () => {
+    if (!pin) return;
+    setLoading(true);
+    setError('');
+    const res = await fetch('/api/journal-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'verify', pin }),
+    });
+    const data = await res.json();
+    if (data.valid) {
+      sessionStorage.setItem('journal_unlocked', 'true');
+      onUnlock();
+    } else {
+      setError('Incorrect PIN');
+      setPin('');
+    }
+    setLoading(false);
+  };
+
+  if (hasPin === null) {
+    return <div className="flex items-center justify-center h-screen"><p className="text-zinc-600">Loading...</p></div>;
+  }
+
+  return (
+    <div className="flex items-center justify-center h-screen">
+      <div className="max-w-xs w-full">
+        <div className="text-center mb-8">
+          <span className="text-4xl mb-4 block">🔒</span>
+          <h1 className="text-xl font-semibold text-zinc-100">
+            {step === 'create' ? 'Set Journal PIN' : 'Unlock Journal'}
+          </h1>
+          <p className="text-sm text-zinc-500 mt-2">
+            {step === 'create'
+              ? 'Create a PIN to protect your private journal entries.'
+              : 'Enter your PIN to access your journal.'}
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <input
+            type="password"
+            value={pin}
+            onChange={e => setPin(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && (step === 'create' ? undefined : verifyPin())}
+            placeholder={step === 'create' ? 'Create PIN (min 4 chars)' : 'Enter PIN'}
+            autoFocus
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-center text-lg tracking-[0.3em] text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
+          />
+
+          {step === 'create' && (
+            <input
+              type="password"
+              value={confirmPin}
+              onChange={e => setConfirmPin(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && createPin()}
+              placeholder="Confirm PIN"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-center text-lg tracking-[0.3em] text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
+            />
+          )}
+
+          {error && <p className="text-sm text-red-400 text-center">{error}</p>}
+
+          <button
+            onClick={step === 'create' ? createPin : verifyPin}
+            disabled={loading}
+            className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-700 text-white font-medium rounded-lg transition-colors"
+          >
+            {loading ? 'Verifying...' : step === 'create' ? 'Set PIN' : 'Unlock'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Components ────────────────────────────────────────────────────────────────
+
 function MoodPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <div className="flex gap-2 items-center">
@@ -82,7 +199,9 @@ function MiniCalendar({ datesWithEntries, selectedDate, onSelect }: {
   );
 }
 
-export default function JournalPage() {
+// ── Main Journal (behind lock) ───────────────────────────────────────────────
+
+function JournalContent() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [content, setContent] = useState('');
   const [mood, setMood] = useState(0);
@@ -118,18 +237,11 @@ export default function JournalPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        content,
-        type: 'journal',
-        tags: [],
-        mood: mood || null,
-        status: 'active',
-        connections: [],
+        content, type: 'journal', tags: [],
+        mood: mood || null, status: 'active', connections: [],
       }),
     });
-    if (res.ok) {
-      setContent(''); setMood(0);
-      await fetchEntries();
-    }
+    if (res.ok) { setContent(''); setMood(0); await fetchEntries(); }
     setIsSaving(false);
   };
 
@@ -137,31 +249,27 @@ export default function JournalPage() {
     setLoadingReview(true);
     try {
       const res = await fetch('/api/summary', { method: 'POST' });
-      if (res.ok) {
-        const d = await res.json();
-        setWeeklyReview(d.summary);
-      }
+      if (res.ok) { const d = await res.json(); setWeeklyReview(d.summary); }
     } finally { setLoadingReview(false); }
   };
 
-  const datesWithEntries = new Set(entries.map(e => e.created_at.split('T')[0]));
+  const handleLock = () => {
+    sessionStorage.removeItem('journal_unlocked');
+    window.location.reload();
+  };
 
+  const datesWithEntries = new Set(entries.map(e => e.created_at.split('T')[0]));
   const filteredEntries = selectedDate
     ? entries.filter(e => e.created_at.startsWith(selectedDate))
     : entries;
-
   const todayEntries = entries.filter(e => e.created_at.startsWith(new Date().toISOString().split('T')[0]));
   const avgMood = todayEntries.filter(e => e.mood).reduce((sum, e, _, arr) => sum + (e.mood ?? 0) / arr.length, 0);
 
   return (
     <div className="flex h-screen">
-      {/* Sidebar: calendar + weekly review */}
+      {/* Sidebar */}
       <aside className="w-60 shrink-0 border-r border-zinc-800/50 p-4 space-y-4 overflow-y-auto">
-        <MiniCalendar
-          datesWithEntries={datesWithEntries}
-          selectedDate={selectedDate}
-          onSelect={setSelectedDate}
-        />
+        <MiniCalendar datesWithEntries={datesWithEntries} selectedDate={selectedDate} onSelect={setSelectedDate} />
 
         {selectedDate && (
           <button onClick={() => setSelectedDate(null)} className="text-xs text-indigo-400 hover:text-indigo-300">
@@ -191,12 +299,23 @@ export default function JournalPage() {
             <p className="text-xs text-zinc-300 leading-relaxed">{weeklyReview}</p>
           </div>
         )}
+
+        {/* Lock button */}
+        <button
+          onClick={handleLock}
+          className="w-full text-sm px-3 py-2 rounded-lg border border-red-900/50 text-red-400/70 hover:text-red-400 hover:border-red-500/50 transition-colors"
+        >
+          🔒 Lock journal
+        </button>
       </aside>
 
-      {/* Main journal area */}
+      {/* Main */}
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-2xl mx-auto">
-          <h1 className="text-xl font-semibold text-zinc-100 mb-6">Journal</h1>
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-xl font-semibold text-zinc-100">Journal</h1>
+            <span className="text-[11px] text-emerald-400/60 flex items-center gap-1">🔓 Unlocked</span>
+          </div>
 
           {/* Daily prompts */}
           {prompts.length > 0 && (
@@ -275,4 +394,22 @@ export default function JournalPage() {
       </div>
     </div>
   );
+}
+
+// ── Page wrapper: lock → content ─────────────────────────────────────────────
+
+export default function JournalPage() {
+  const [unlocked, setUnlocked] = useState(false);
+
+  useEffect(() => {
+    if (sessionStorage.getItem('journal_unlocked') === 'true') {
+      setUnlocked(true);
+    }
+  }, []);
+
+  if (!unlocked) {
+    return <PinLock onUnlock={() => setUnlocked(true)} />;
+  }
+
+  return <JournalContent />;
 }

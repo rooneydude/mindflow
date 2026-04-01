@@ -171,8 +171,8 @@ export default function Dashboard() {
       .sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? ''));
   }, [entries, today]);
 
-  // Recent entries (last 8, all types)
-  const recent = entries.slice(0, 8);
+  // Recent entries (last 8, EXCLUDE journal content for privacy)
+  const recent = entries.filter(e => e.type !== 'journal').slice(0, 8);
 
   const typeIcons: Record<string, string> = { thought: '💡', task: '✅', journal: '📝', plan: '🎯' };
 
