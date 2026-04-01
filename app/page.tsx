@@ -68,6 +68,8 @@ export default function Dashboard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [dailySummary, setDailySummary] = useState<DailySummary | null>(null);
   const [dupWarning, setDupWarning] = useState<{ content: string; similar: Entry } | null>(null);
+  const [nudges, setNudges] = useState<{ id: string; type: string; message: string }[]>([]);
+  const [dismissedNudges, setDismissedNudges] = useState<Set<string>>(new Set());
 
   const fetchEntries = useCallback(async () => {
     const res = await fetch('/api/entries?limit=200');
@@ -77,6 +79,9 @@ export default function Dashboard() {
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
   useEffect(() => {
     fetch('/api/summary').then(r => r.ok ? r.json() : null).then(d => { if (d) setDailySummary(d); });
+    fetch('/api/reminders').then(r => r.ok ? r.json() : null).then(d => { if (d) setNudges(d); });
+    const dismissed = JSON.parse(localStorage.getItem(`dismissed_nudges_${new Date().toISOString().split('T')[0]}`) || '[]');
+    setDismissedNudges(new Set(dismissed));
   }, []);
 
   const handleSubmit = async (content: string) => {
@@ -233,12 +238,27 @@ export default function Dashboard() {
             value={weekEntries.length}
             sub={`${completedThisWeek} tasks done`}
           />
-          <StatCard
-            label="Mood"
-            value={avgMood > 0 ? MOOD_EMOJIS[avgMood] : '—'}
-            sub={avgMood > 0 ? ['', 'Rough', 'Meh', 'Okay', 'Good', 'Great'][avgMood] : 'No mood logged today'}
-            href="/journal"
-          />
+          <div className="border border-zinc-800 rounded-xl p-4">
+            <p className="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Mood</p>
+            <p className="text-2xl font-semibold text-zinc-100 mb-1">{avgMood > 0 ? MOOD_EMOJIS[avgMood] : '—'}</p>
+            <div className="flex gap-1.5 mt-1">
+              {[1,2,3,4,5].map(m => (
+                <button
+                  key={m}
+                  onClick={async () => {
+                    await fetch('/api/entries', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ content: 'Mood check-in', type: 'journal', mood: m, status: 'active', tags: [], connections: [] }),
+                    });
+                    await fetchEntries();
+                  }}
+                  className="text-sm opacity-50 hover:opacity-100 transition-opacity"
+                  title={['','Rough','Meh','Okay','Good','Great'][m]}
+                >{MOOD_EMOJIS[m]}</button>
+              ))}
+            </div>
+          </div>
           <StatCard
             label="Streak"
             value={`${streak}d`}
@@ -254,6 +274,26 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Smart nudges */}
+        {nudges.filter(n => !dismissedNudges.has(n.id)).length > 0 && (
+          <div className="mb-6 space-y-2">
+            {nudges.filter(n => !dismissedNudges.has(n.id)).map(n => (
+              <div key={n.id} className="flex items-center gap-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                <span className="text-amber-400 shrink-0">{n.type === 'stale_plan' ? '🎯' : n.type === 'neglected_overdue' ? '⚠️' : '💡'}</span>
+                <p className="text-xs text-zinc-300 flex-1">{n.message}</p>
+                <button
+                  onClick={() => {
+                    const next = new Set([...dismissedNudges, n.id]);
+                    setDismissedNudges(next);
+                    localStorage.setItem(`dismissed_nudges_${new Date().toISOString().split('T')[0]}`, JSON.stringify([...next]));
+                  }}
+                  className="text-[10px] text-zinc-600 hover:text-zinc-400 shrink-0"
+                >dismiss</button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Two column layout */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {/* Today's focus */}
@@ -265,14 +305,31 @@ export default function Dashboard() {
             {[...overdue, ...tasksDueToday].length === 0 ? (
               <p className="text-sm text-zinc-600 py-4 text-center">No tasks due today. Nice!</p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {[...overdue, ...tasksDueToday].slice(0, 6).map(t => (
-                  <div key={t.id} className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${
-                      t.due_date && t.due_date < today ? 'bg-red-500' : 'bg-amber-500'
-                    }`} />
-                    <span className="text-sm text-zinc-300 truncate">{t.content}</span>
-                    {t.project && <span className="text-[10px] text-zinc-600 ml-auto shrink-0">{t.project}</span>}
+                  <div key={t.id} className="group flex items-center gap-2 py-1 px-1 rounded hover:bg-zinc-800/40">
+                    <button
+                      onClick={async () => {
+                        await fetch('/api/entries', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: t.id, status: 'completed' }) });
+                        await fetchEntries();
+                      }}
+                      className="w-4 h-4 rounded border border-zinc-600 hover:border-emerald-500 shrink-0 flex items-center justify-center transition-colors"
+                      title="Complete"
+                    />
+                    <span className={`text-sm text-zinc-300 truncate ${t.due_date && t.due_date < today ? 'text-red-300' : ''}`}>{t.content}</span>
+                    <div className="flex items-center gap-1 ml-auto shrink-0 opacity-0 group-hover:opacity-100">
+                      <button
+                        onClick={async () => {
+                          const next = new Date(t.due_date + 'T12:00:00');
+                          next.setDate(next.getDate() + 1);
+                          await fetch('/api/entries', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: t.id, due_date: next.toISOString().split('T')[0] }) });
+                          await fetchEntries();
+                        }}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+                        title="Snooze +1 day"
+                      >⏰+1</button>
+                    </div>
+                    {t.project && <span className="text-[10px] text-zinc-600 shrink-0">{t.project}</span>}
                   </div>
                 ))}
               </div>

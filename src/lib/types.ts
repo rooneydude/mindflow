@@ -49,6 +49,21 @@ export interface DailySummary {
   created_at: string;
 }
 
+export interface Habit {
+  id: string;
+  name: string;
+  icon: string;
+  is_archived: boolean;
+  created_at: string;
+}
+
+export interface HabitCompletion {
+  id: string;
+  habit_id: string;
+  date: string;
+  created_at: string;
+}
+
 export interface AIAnalysis {
   type: EntryType;
   tags: string[];

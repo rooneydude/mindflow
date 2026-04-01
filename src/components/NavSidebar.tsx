@@ -9,13 +9,16 @@ const navItems = [
   { href: '/journal', label: 'Journal', icon: '📝' },
   { href: '/thoughts', label: 'Thoughts', icon: '💡' },
   { href: '/plans', label: 'Plans', icon: '🎯' },
+  { href: '/habits', label: 'Habits', icon: '🔥' },
+  { href: '/insights', label: 'Insights', icon: '📊' },
+  { href: '/settings', label: 'Settings', icon: '⚙️' },
 ];
 
 export default function NavSidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-16 lg:w-52 shrink-0 border-r border-zinc-800/50 min-h-screen flex flex-col">
+    <aside className="hidden md:flex w-16 lg:w-52 shrink-0 border-r border-zinc-800/50 min-h-screen flex-col">
       <div className="p-4 lg:px-5 border-b border-zinc-800/50">
         <Link href="/" className="flex items-center gap-2">
           <span className="text-xl">🌊</span>
