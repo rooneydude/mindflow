@@ -9,28 +9,36 @@ const supabase = createClient(
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 export async function POST(request: NextRequest) {
-  const { query } = await request.json();
+  const { query, type } = await request.json();
 
-  // Fetch recent non-journal entries
-  const { data: entries } = await supabase
+  // Build query - if type specified, filter to that type; otherwise exclude journal
+  let q = supabase
     .from('entries')
-    .select('id, content, type, tags, project, created_at, due_date, status')
+    .select('id, content, type, tags, project, created_at, due_date, status, mood')
     .eq('is_archived', false)
-    .neq('type', 'journal')
     .order('created_at', { ascending: false })
     .limit(100);
 
+  if (type) {
+    q = q.eq('type', type);
+  } else {
+    q = q.neq('type', 'journal');
+  }
+
+  const { data: entries } = await q;
   const all = entries || [];
+
   const context = all.map((e, i) =>
-    `[${i}] (${e.type}) "${e.content}"${e.project ? ` [${e.project}]` : ''}${e.due_date ? ` due:${e.due_date}` : ''} status:${e.status}`
+    `[${i}] (${e.type}) "${e.content}"${e.project ? ` [${e.project}]` : ''}${e.due_date ? ` due:${e.due_date}` : ''}${e.mood ? ` mood:${e.mood}/5` : ''} ${e.created_at.split('T')[0]}`
   ).join('\n');
 
+  const isJournal = type === 'journal';
   const msg = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 512,
     messages: [{
       role: 'user',
-      content: `You are searching through a personal planner's entries. Answer the user's question based on these entries.
+      content: `You are searching through a personal ${isJournal ? 'journal' : 'planner'}. Answer the user's question based on these entries.
 
 User's question: "${query}"
 
@@ -39,7 +47,7 @@ ${context}
 
 Return ONLY valid JSON:
 {
-  "answer": "A concise, helpful answer to their question",
+  "answer": "A concise, helpful answer to their question${isJournal ? ', synthesizing their thoughts and feelings on this topic' : ''}",
   "relevant_indices": [0, 3, 7] (indices of the most relevant entries from the list above, max 5)
 }`
     }]

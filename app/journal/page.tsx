@@ -211,6 +211,11 @@ function JournalContent() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [weeklyReview, setWeeklyReview] = useState<string | null>(null);
   const [loadingReview, setLoadingReview] = useState(false);
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [aiQuery, setAiQuery] = useState('');
+  const [aiAnswer, setAiAnswer] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResults, setAiResults] = useState<Entry[]>([]);
 
   const fetchEntries = useCallback(async () => {
     const params = new URLSearchParams({ type: 'journal', limit: '200' });
@@ -233,16 +238,44 @@ function JournalContent() {
   const saveEntry = async () => {
     if (!content.trim() || isSaving) return;
     setIsSaving(true);
+    // Run AI analysis to get tags and connections
+    const analyzeRes = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    const analysis = analyzeRes.ok ? await analyzeRes.json() : { tags: [], connections: [], summary: '' };
     const res = await fetch('/api/entries', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        content, type: 'journal', tags: [],
-        mood: mood || null, status: 'active', connections: [],
+        content, type: 'journal', tags: analysis.tags || [],
+        embedding_summary: analysis.summary || null,
+        mood: mood || analysis.mood || null,
+        status: 'active', connections: analysis.connections || [],
       }),
     });
     if (res.ok) { setContent(''); setMood(0); await fetchEntries(); }
     setIsSaving(false);
+  };
+
+  const searchJournal = async () => {
+    if (!aiQuery.trim() || aiLoading) return;
+    setAiLoading(true);
+    setAiAnswer('');
+    setAiResults([]);
+    try {
+      const res = await fetch('/api/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: aiQuery, type: 'journal' }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAiAnswer(data.answer);
+        setAiResults(data.entries || []);
+      }
+    } finally { setAiLoading(false); }
   };
 
   const generateWeeklyReview = async () => {
@@ -259,9 +292,14 @@ function JournalContent() {
   };
 
   const datesWithEntries = new Set(entries.map(e => e.created_at.split('T')[0]));
-  const filteredEntries = selectedDate
+  const allTags = Array.from(new Set(entries.flatMap(e => e.tags || []))).sort();
+
+  let filteredEntries = selectedDate
     ? entries.filter(e => e.created_at.startsWith(selectedDate))
     : entries;
+  if (activeTag) {
+    filteredEntries = filteredEntries.filter(e => (e.tags || []).includes(activeTag));
+  }
   const todayEntries = entries.filter(e => e.created_at.startsWith(new Date().toISOString().split('T')[0]));
   const avgMood = todayEntries.filter(e => e.mood).reduce((sum, e, _, arr) => sum + (e.mood ?? 0) / arr.length, 0);
 
@@ -297,6 +335,31 @@ function JournalContent() {
           <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-lg p-3">
             <p className="text-[11px] text-indigo-400 font-medium mb-1">Weekly Review</p>
             <p className="text-xs text-zinc-300 leading-relaxed">{weeklyReview}</p>
+          </div>
+        )}
+
+        {/* Tags filter */}
+        {allTags.length > 0 && (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+            <p className="text-[11px] text-zinc-500 font-medium mb-2">Tags</p>
+            <div className="flex flex-wrap gap-1.5">
+              {allTags.map(tag => (
+                <button
+                  key={tag}
+                  onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                  className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                    activeTag === tag
+                      ? 'bg-indigo-500/20 text-indigo-300'
+                      : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >{tag}</button>
+              ))}
+            </div>
+            {activeTag && (
+              <button onClick={() => setActiveTag(null)} className="text-[10px] text-zinc-600 hover:text-zinc-400 mt-2">
+                Clear filter
+              </button>
+            )}
           </div>
         )}
 
@@ -358,10 +421,54 @@ function JournalContent() {
             </div>
           </div>
 
+          {/* AI Journal Search */}
+          <div className="mb-6 bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+            <div className="flex gap-2">
+              <input
+                value={aiQuery}
+                onChange={e => setAiQuery(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && searchJournal()}
+                placeholder="Search your journal... (e.g. 'what have I written about motivation?')"
+                className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none"
+              />
+              <button
+                onClick={searchJournal}
+                disabled={aiLoading || !aiQuery.trim()}
+                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-700 text-white text-xs rounded-lg shrink-0"
+              >
+                {aiLoading ? '✨ Searching...' : '✨ Search'}
+              </button>
+            </div>
+            {aiAnswer && (
+              <div className="mt-3 p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg">
+                <p className="text-[10px] text-indigo-400 uppercase tracking-wider mb-1">Answer</p>
+                <p className="text-sm text-zinc-200 leading-relaxed">{aiAnswer}</p>
+              </div>
+            )}
+            {aiResults.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <p className="text-[10px] text-zinc-600 uppercase tracking-wider">Related entries</p>
+                {aiResults.map(r => {
+                  const d = new Date(r.created_at);
+                  return (
+                    <div key={r.id} className="border border-zinc-800/50 rounded-lg p-3">
+                      <span className="text-[10px] text-zinc-500">
+                        {d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                      <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{r.content}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Entry list */}
-          {selectedDate && (
+          {(selectedDate || activeTag) && (
             <p className="text-xs text-zinc-500 mb-3">
-              Showing entries for {new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+              {selectedDate && `Showing entries for ${new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`}
+              {selectedDate && activeTag && ' · '}
+              {activeTag && `Tagged: ${activeTag}`}
             </p>
           )}
 
@@ -372,7 +479,7 @@ function JournalContent() {
                 <div key={entry.id} className="border border-zinc-800 rounded-xl p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-[11px] text-zinc-500">
-                      {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                      {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · {date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                     </span>
                     {entry.mood && (
                       <span className="text-base ml-auto" title={MOOD_LABELS[entry.mood]}>
@@ -381,6 +488,19 @@ function JournalContent() {
                     )}
                   </div>
                   <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{entry.content}</p>
+                  {(entry.tags || []).length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-3 pt-2 border-t border-zinc-800/50">
+                      {entry.tags.map(tag => (
+                        <button
+                          key={tag}
+                          onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                          className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                            activeTag === tag ? 'bg-indigo-500/20 text-indigo-300' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
+                          }`}
+                        >{tag}</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
